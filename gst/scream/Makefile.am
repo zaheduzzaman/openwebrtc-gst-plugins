@@ -10,7 +10,7 @@ libgstscream_la_CFLAGS = \
     $(GST_BASE_CFLAGS) \
     $(GST_CFLAGS)
 
-libgstscream_la_LIBADD = $(GST_LIBS) $(GST_BASE_LIBS)
+libgstscream_la_LIBADD = $(GST_LIBS) $(GST_BASE_LIBS) -lgstrtp-1.0
 
 noinst_HEADERS = \
     gstscreamcontroller.h \
