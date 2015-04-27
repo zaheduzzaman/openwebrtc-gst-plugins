@@ -338,7 +338,9 @@ static void gst_scream_queue_finalize(GObject *object)
     g_hash_table_unref(self->adapted_stream_ids);
     g_hash_table_unref(self->ignored_stream_ids);
 
-    g_object_unref(self->scream_controller);
+    if (self->scream_controller) {
+        g_object_unref(self->scream_controller);
+    }
 
     G_OBJECT_CLASS(parent_class)->finalize (object);
 }
