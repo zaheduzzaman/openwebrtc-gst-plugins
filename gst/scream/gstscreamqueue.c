@@ -278,6 +278,7 @@ static void gst_scream_queue_init(GstScreamQueue *self)
     GST_PAD_SET_PROXY_CAPS(self->src_pad);
     gst_element_add_pad(GST_ELEMENT(self), self->src_pad);
 
+    g_rw_lock_init(&self->lock);
     self->streams = g_hash_table_new_full(NULL, NULL, NULL, (GDestroyNotify)destroy_stream);
     self->adapted_stream_ids = g_hash_table_new(NULL, NULL);
     self->ignored_stream_ids = g_hash_table_new(NULL, NULL);
@@ -591,7 +592,9 @@ static GstScreamStream * get_stream(GstScreamQueue *self, guint ssrc, guint pt)
     guint stream_id = ssrc;
 
     if (G_LIKELY(g_hash_table_contains(self->adapted_stream_ids, GUINT_TO_POINTER(stream_id)))) {
+        g_rw_lock_reader_lock(&self->lock);
         stream = g_hash_table_lookup(self->streams, GUINT_TO_POINTER(stream_id));
+        g_rw_lock_reader_unlock(&self->lock);
     } else if (g_hash_table_contains(self->ignored_stream_ids, GUINT_TO_POINTER(stream_id))) {
         /* DO NOTHING */
     } else {
@@ -619,7 +622,9 @@ static GstScreamStream * get_stream(GstScreamQueue *self, guint ssrc, guint pt)
                 (GstDataQueueEmptyCallback)packet_queue_empty_cb, self);
                 stream->enqueued_payload_size = 0;
                 stream->enqueued_packets = 0;
+                g_rw_lock_writer_lock(&self->lock);
                 g_hash_table_insert(self->streams, GUINT_TO_POINTER(stream_id), stream);
+                g_rw_lock_writer_unlock(&self->lock);
                 g_hash_table_add(self->adapted_stream_ids, GUINT_TO_POINTER(stream_id));
             } else {
                 g_warning("Failed to register new stream\n");
@@ -637,7 +642,9 @@ static guint get_next_packet_rtp_payload_size(guint stream_id, GstScreamQueue *s
     GstScreamStream *stream;
     guint size = 0;
 
+    g_rw_lock_reader_lock(&self->lock);
     stream = g_hash_table_lookup(self->streams, GUINT_TO_POINTER(stream_id));
+    g_rw_lock_reader_unlock(&self->lock);
     if (!gst_data_queue_is_empty(stream->packet_queue) && gst_data_queue_peek(stream->packet_queue, (GstDataQueueItem **)&item)) {
         /* TODO: Does the item needs to become threadsafe? */
         size = item->rtp_payload_size;
@@ -682,7 +689,9 @@ static void on_bitrate_change(guint bitrate, guint stream_id, GstScreamQueue *se
     BitrateChangeStruct *bitrate_struct;
     GstScreamStream *stream;
 
+    g_rw_lock_reader_lock(&self->lock);
     stream = g_hash_table_lookup(self->streams, GUINT_TO_POINTER(stream_id));
+    g_rw_lock_reader_unlock(&self->lock);
     g_return_if_fail(stream);
 
     bitrate_struct = g_slice_new(BitrateChangeStruct);
@@ -699,7 +708,9 @@ static void approve_transmit_cb(guint stream_id, GstScreamQueue *self) {
     GstScreamDataQueueRtpItem *item;
     GstScreamStream *stream;
 
+    g_rw_lock_reader_lock(&self->lock);
     stream = g_hash_table_lookup(self->streams, GUINT_TO_POINTER(stream_id));
+    g_rw_lock_reader_unlock(&self->lock);
 
     if (gst_data_queue_pop(stream->packet_queue, (GstDataQueueItem **)&item)) {
         stream->enqueued_payload_size -= item->rtp_payload_size;
@@ -713,8 +724,9 @@ static void clear_queue(guint stream_id, GstScreamQueue *self)
 {
     GstScreamStream *stream;
     g_print("clear_queue()");
-
+    g_rw_lock_reader_lock(&self->lock);
     stream = g_hash_table_lookup(self->streams, GUINT_TO_POINTER(stream_id));
+    g_rw_lock_reader_unlock(&self->lock);
     gst_data_queue_flush(stream->packet_queue);
     stream->enqueued_payload_size = 0;
     stream->enqueued_packets = 0;

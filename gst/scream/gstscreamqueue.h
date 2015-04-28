@@ -56,6 +56,7 @@ struct _GstScreamQueue {
     gboolean stream_registered;
     guint priority;
 
+    GRWLock lock;
     GHashTable *streams;
     GHashTable *adapted_stream_ids;
     GHashTable *ignored_stream_ids;
