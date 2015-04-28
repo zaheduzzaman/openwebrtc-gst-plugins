@@ -206,7 +206,7 @@ static void gst_scream_queue_class_init(GstScreamQueueClass *klass)
     gst_element_class_set_static_metadata(element_class,
         "SCREAM Queue",
         "Queue/Network/Adaptation",
-        "Queueodes packets with SCREAM",
+        "RTP Queue for SCREAM adaptation",
         "Daniel Lindström <daniel.lindstrom@ericsson.com>");
 }
 
