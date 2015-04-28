@@ -222,19 +222,11 @@ static void data_queue_empty_cb(GstDataQueue *queue, gpointer user_data)
 
 static void data_queue_full_cb(GstDataQueue *queue, gpointer user_data)
 {
-
 }
 
 static gboolean packet_queue_check_full_cb(GstDataQueue *queue, guint visible, guint bytes,
     guint64 time, GstScreamStream *stream)
 {
-    /*
-    gboolean is_full = FALSE;
-    if (bytes > 10000000)
-        is_full = TRUE;
-
-    return is_full;
-    */
     return FALSE;
 }
 
@@ -244,12 +236,6 @@ static void packet_queue_empty_cb(GstDataQueue *queue, GstScreamStream *stream)
 
 static void packet_queue_full_cb(GstDataQueue *queue, GstScreamStream *stream)
 {
-    /*
-    GstDataQueueItem *item;
-    while (gst_data_queue_pop(queue, (GstDataQueueItem **)&item)) {
-        item->item.destroy(item);
-    }
-    */
 }
 
 
