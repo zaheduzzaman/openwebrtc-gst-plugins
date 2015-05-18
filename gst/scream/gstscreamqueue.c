@@ -533,15 +533,6 @@ static void gst_scream_queue_srcpad_loop(GstScreamQueue *self)
     }
     self->next_approve_time = time_now_us + time_until_next_approve;
 
-
-    /* Check for incoming RTP and RTCP packets and act on them */
-    /* TODO: This will use a lot of cpu since the loop will never stop.. we need to
-        let the next pop lock the thread.
-    if (gst_data_queue_is_empty(self->incoming_packets)) {
-        goto end;
-    }
-    */
-
     if (!gst_data_queue_pop(self->incoming_packets, (GstDataQueueItem **)&item)) {
         /* flushing */
         g_warning("Failed to pop from incoming packets queue. Flushing?");
@@ -648,7 +639,6 @@ static guint get_next_packet_rtp_payload_size(guint stream_id, GstScreamQueue *s
     stream = g_hash_table_lookup(self->streams, GUINT_TO_POINTER(stream_id));
     g_rw_lock_reader_unlock(&self->lock);
     if (!gst_data_queue_is_empty(stream->packet_queue) && gst_data_queue_peek(stream->packet_queue, (GstDataQueueItem **)&item)) {
-        /* TODO: Does the item needs to become threadsafe? */
         size = item->rtp_payload_size;
     }
     return size;
