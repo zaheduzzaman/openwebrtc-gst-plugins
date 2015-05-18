@@ -535,9 +535,12 @@ static void gst_scream_queue_srcpad_loop(GstScreamQueue *self)
 
 
     /* Check for incoming RTP and RTCP packets and act on them */
+    /* TODO: This will use a lot of cpu since the loop will never stop.. we need to
+        let the next pop lock the thread.
     if (gst_data_queue_is_empty(self->incoming_packets)) {
         goto end;
     }
+    */
 
     if (!gst_data_queue_pop(self->incoming_packets, (GstDataQueueItem **)&item)) {
         /* flushing */
