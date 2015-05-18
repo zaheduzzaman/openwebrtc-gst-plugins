@@ -90,7 +90,7 @@
 #define OWD_TARGET_MAX 0.4f /* ms */
 /* Congestion window validation */
 #define BYTES_IN_FLIGHT_HIST_INTERVAL 1000000 /* Time (us) between stores */
-#define MAX_BYTES_IN_FLIGHT_HEADROOM 1.2f
+#define MAX_BYTES_IN_FLIGHT_HEADROOM 1.0f
 /* OWD trend and shared bottleneck detection */
 #define OWD_FRACTION_HIST_INTERVAL 50000 /* us */
 /* Max video rate estimation update period */
@@ -172,22 +172,12 @@ typedef struct {
 typedef struct {
     GstScreamController *controller;
     guint stream_id;
-    guint rtp_timestamp;
-    guint64 time_now_us;
-    guint bytes_in_queue;
-} NewRtpPacket;
-
-
-typedef struct {
-    GstScreamController *controller;
-    guint stream_id;
     guint timestamp;              /* Wall clock timestamp */
     guint highest_seq;            /* Highest received sequence number */
     guint n_loss;                 /* Number of detected losses */
     gboolean q_bit;               /* Quench bit */
 } ScreamFeedback;
 
-static guint signals[LAST_SIGNAL] = { 0 };
 static GParamSpec *properties[NUM_PROPERTIES];
 
 static GHashTable *controllers = NULL;
@@ -545,7 +535,7 @@ guint64 gst_scream_controller_approve_transmits(GstScreamController *self, guint
     ScreamStream *stream;
     guint size_of_next_rtp;
     gboolean exit;
-    GList *it;
+    GList *it, *list;
     guint64 next_approve_time = DONT_APPROVE_TRANSMIT_TIME;
 
     /*
@@ -554,7 +544,7 @@ guint64 gst_scream_controller_approve_transmits(GstScreamController *self, guint
     */
     if (time_us - self->last_rate_update_t_us >= RATE_UPDATE_INTERVAL) {
         float t_delta = (time_us - self->last_rate_update_t_us)/1e6;
-        it = g_hash_table_get_values(self->streams);
+        list = it = g_hash_table_get_values(self->streams);
         self->rate_transmitted = 0.0f;
         while (it) {
             ScreamStream *stream  = (ScreamStream *)it->data;
@@ -563,6 +553,7 @@ guint64 gst_scream_controller_approve_transmits(GstScreamController *self, guint
             it = g_list_next(it);
 
         }
+        g_list_free(list);
         self->last_rate_update_t_us = time_us;
     }
 
@@ -682,7 +673,7 @@ static void initialize(GstScreamController *self, guint64 time_us) {
 static ScreamStream * get_prioritized_stream(GstScreamController *self)
 {
     ScreamStream *it_stream, *stream = NULL;
-    GList *it;
+    GList *it, *list;
     guint next_packet_size;
     float max_prio = 0.0, max_credit = 1.0, priority;
 
@@ -690,7 +681,7 @@ static ScreamStream * get_prioritized_stream(GstScreamController *self)
     * Pick a stream with credit higher or equal to
     * the next RTP packet in queue for the given stream.
     */
-    it = g_hash_table_get_values(self->streams);
+    list = it = g_hash_table_get_values(self->streams);
     while (it) {
         it_stream = (ScreamStream *)it->data;
         if (it_stream->bytes_in_queue) {
@@ -705,6 +696,7 @@ static ScreamStream * get_prioritized_stream(GstScreamController *self)
         }
         it = g_list_next(it);
     }
+    g_list_free(list);
     if (stream)
         goto end;
 
@@ -715,7 +707,7 @@ static ScreamStream * get_prioritized_stream(GstScreamController *self)
     * add credit to streams with RTP packets in queue that did not
     * get served.
     */
-    it = g_hash_table_get_values(self->streams);
+    list = it = g_hash_table_get_values(self->streams);
     while (it) {
         it_stream = (ScreamStream *)it->data;
         priority = it_stream->priority;
@@ -725,6 +717,7 @@ static ScreamStream * get_prioritized_stream(GstScreamController *self)
         }
         it = g_list_next(it);
     }
+    g_list_free(list);
 end:
     return stream;
 
@@ -733,12 +726,12 @@ end:
 static void add_credit(GstScreamController *self, ScreamStream *served_stream,
     int transmitted_bytes)
 {
-    GList *it;
+    GList *it, *list;
     ScreamStream *stream_it;
     gfloat credit;
     guint next_packet_size;
 
-    it = g_hash_table_get_values(self->streams);
+    list = it = g_hash_table_get_values(self->streams);
     while (it) {
         stream_it = (ScreamStream *)it->data;
         if (stream_it->id != served_stream->id) {
@@ -751,6 +744,7 @@ static void add_credit(GstScreamController *self, ScreamStream *served_stream,
             }
         it = g_list_next(it);
     }
+    g_list_free(list);
 }
 
 static void subtract_credit(GstScreamController *self, ScreamStream *served_stream,
@@ -811,18 +805,10 @@ static void update_bytes_in_flight_history(GstScreamController *self, guint64 ti
 
 void update_rate(GstScreamController *self, ScreamStream *stream, float t_delta)
 {
-    gint i;
     stream->rate_transmitted = 0.5f * (stream->rate_transmitted +
         stream->bytes_transmitted * 8.0f / t_delta);
     stream->rate_acked = 0.5f * (stream->rate_acked + stream->bytes_acked * 8.0f / t_delta);
     stream->rate_rtp = stream->bytes_rtp * 8.0f / t_delta;
-    if (stream->rate_rtp_hist[0] == 0.0f) {
-        /*
-        * Initialize history
-        */
-        for (i=0; i < RATE_RTP_HIST_SIZE; i++)
-            stream->rate_rtp_hist[i] = stream->rate_rtp;
-    }
 
     /*
     * Generate a media RTP bitrate value, this serves to set a reasonably safe
@@ -835,34 +821,44 @@ void update_rate(GstScreamController *self, ScreamStream *stream, float t_delta)
         /*
         * An average video bitrate is stored every ~1.0s
         */
-        gboolean is_picked[RATE_RTP_HIST_SIZE];
-        gfloat sorted[RATE_RTP_HIST_SIZE];
-        gint i,j;
         stream->rate_rtp_hist[stream->rate_rtp_hist_ptr] = stream->rate_rtp_sum/5;
         stream->rate_rtp_hist_ptr = (stream->rate_rtp_hist_ptr + 1) % RATE_RTP_HIST_SIZE;
         stream->rate_rtp_sum = 0;
         stream->rate_rtp_sum_n = 0;
-        /*
-        * Create a sorted list
-        */
-        for (i=0; i < RATE_RTP_HIST_SIZE; i++)
-            is_picked[i] = FALSE;
-        for (i=0; i < RATE_RTP_HIST_SIZE; i++) {
-            gfloat min_r = 1.0e8;
-            gint min_i;
-            for (j=0; j < RATE_RTP_HIST_SIZE; j++) {
-                if (stream->rate_rtp_hist[j] < min_r && !is_picked[j]) {
-                    min_r = stream->rate_rtp_hist[j];
-                    min_i = j;
+
+        if (stream->rate_rtp_hist[RATE_RTP_HIST_SIZE-1] > 0.0f) {
+            /*
+            * Compute median rate when there is to compute
+            * from
+            */
+            gboolean is_picked[RATE_RTP_HIST_SIZE];
+            gfloat sorted[RATE_RTP_HIST_SIZE];
+            gint i;
+            /*
+            * Create a sorted list
+            */
+            for (i=0; i < RATE_RTP_HIST_SIZE; i++)
+                is_picked[i] = FALSE;
+            for (i=0; i < RATE_RTP_HIST_SIZE; i++) {
+                gfloat min_r = 1.0e8;
+                gint min_i = 0;
+                gint j;
+                for (j=0; j < RATE_RTP_HIST_SIZE; j++) {
+                    if (stream->rate_rtp_hist[j] < min_r && !is_picked[j]) {
+                        min_r = stream->rate_rtp_hist[j];
+                        min_i = j;
+                    }
                 }
+                sorted[i] = min_r;
+                is_picked[min_i] = TRUE;
             }
-            sorted[i] = min_r;
-            is_picked[min_i] = TRUE;
+            /*
+            * Get median value
+            */
+            stream->rate_rtp_median = sorted[RATE_RTP_HIST_SIZE/2];
+        } else {
+            stream->rate_rtp_median = 10e6;
         }
-        /*
-        * Get median value
-        */
-        stream->rate_rtp_median = sorted[RATE_RTP_HIST_SIZE/2];
     }
     stream->bytes_acked = 0;
     stream->bytes_rtp = 0;
@@ -874,14 +870,11 @@ static void update_target_stream_bitrate(GstScreamController *self, ScreamStream
 {
     gfloat br = 0, scl_i, priority_sum, priority_scale, increment, scl, tmp;
     guint tx_size_bits = 0;
-    guint sec = 0;
-    GList *it;
+    GList *it, *list;
 
-     if (stream->t_start_us == 0) {
-         stream->t_start_us = time_us;
-
-     }
-     sec = (time_us-stream->t_start_us)/1000000;
+    if (stream->t_start_us == 0) {
+        stream->t_start_us = time_us;
+    }
     /*
     * Compute a maximum bitrate
     */
@@ -924,11 +917,12 @@ static void update_target_stream_bitrate(GstScreamController *self, ScreamStream
         *  streams according to their priorities
         */
         priority_sum = 0.0;
-        it = g_hash_table_get_values(self->streams);
+        list = it = g_hash_table_get_values(self->streams);
         while (it) {
             priority_sum += ((ScreamStream *)it->data)->priority;
             it = g_list_next(it);
         }
+        g_list_free(list);
         priority_scale = sqrt(priority_sum / (stream->priority)) / priority_sum;
         /*
         * TODO This needs to be done differently
@@ -1040,7 +1034,7 @@ static void update_target_stream_bitrate(GstScreamController *self, ScreamStream
     if (!is_competing_flows(self)) {
         gfloat rate_rtp_limit;
         rate_rtp_limit = MAX(br,MAX(stream->rate_rtp,stream->rate_rtp_median));
-        rate_rtp_limit *= (2.0-1.0*self->owd_trend_mem);
+        rate_rtp_limit *= (3.0-2.0*self->owd_trend_mem);
         stream->target_bitrate = MIN(rate_rtp_limit,stream->target_bitrate);
     }
     /*
@@ -1064,7 +1058,7 @@ static void update_target_stream_bitrate(GstScreamController *self, ScreamStream
                     self->cwnd, in_fl,
                     self->srtt_sh_us/1000.0f, self->owd*1000.0f, self->owd_target*1000.0f,
                     self->in_fast_start, self->delta_t/1000.0f);
-}
+    }
     if (stream->on_bitrate_callback)
         stream->on_bitrate_callback((guint)stream->target_bitrate, stream->id, stream->user_data);
 }
@@ -1072,7 +1066,7 @@ static void update_target_stream_bitrate(GstScreamController *self, ScreamStream
 void gst_scream_controller_incoming_feedback(GstScreamController *self, guint stream_id,
     guint64 time_us, guint timestamp, guint highest_seq, guint n_loss, guint n_ecn, gboolean q_bit)
 {
-    GList *it;
+    GList *it, *list;
     TransmittedRtpPacket *packet;
     guint64 rtt_us;
     ScreamStream *stream;
@@ -1141,7 +1135,7 @@ void gst_scream_controller_incoming_feedback(GstScreamController *self, guint st
       /*
       * The loss counter has increased
       */
-      g_printf("LOSS %u  SN=%u\n",n_loss-stream->n_loss,highest_seq);
+      g_print("LOSS %u  SN=%u\n",n_loss-stream->n_loss,highest_seq);
        stream->n_loss = n_loss;
        if (time_us - self->last_loss_event_t_us > self->srtt_us) {
           /*
@@ -1151,11 +1145,12 @@ void gst_scream_controller_incoming_feedback(GstScreamController *self, guint st
           self->loss_event = TRUE;
           self->last_loss_event_t_us = time_us;
 
-          it = g_hash_table_get_values(self->streams);
+          list = it = g_hash_table_get_values(self->streams);
           while (it) {
             ((ScreamStream *)it->data)->loss_event_flag = TRUE;
             it = g_list_next(it);
           }
+          g_list_free(list);
        }
     }
     //g_print("gst_scream_controller_incoming_feedback() highest_seq = %u. "
