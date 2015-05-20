@@ -114,7 +114,7 @@ static GParamSpec *properties[NUM_PROPERTIES];
 #define DEFAULT_PRIORITY 1.0
 #define DEFAULT_PASS_THROUGH FALSE
 #define SCREAM_MAX_BITRATE 10000000
-#define SCREAM_MIN_BITRATE 100000
+#define SCREAM_MIN_BITRATE 64000
 
 GType gst_scream_queue_pad_get_type(void);
 

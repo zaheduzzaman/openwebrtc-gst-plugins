@@ -991,7 +991,6 @@ static void update_target_stream_bitrate(GstScreamController *self, ScreamStream
             /*
             * scl is an an adaptive scaling to prevent overshoot
             */
-            /* TODO: What are the constants? Do defines! */
             scl = MIN(1.0f, MAX(0.0f, self->owd_fraction_avg - 0.3f) / 0.7f);
             scl += self->owd_trend;
 
@@ -1073,7 +1072,6 @@ void gst_scream_controller_incoming_feedback(GstScreamController *self, guint st
     guint32 highest_seq_ext, seq_ext;
     gint n;
 
-    /* TODO: Should the time be an argument instead? */
     stream = g_hash_table_lookup(self->streams, GUINT_TO_POINTER(stream_id));
     if (!stream) {
         g_warning("Received feedback for an unknown stream.");
@@ -1199,7 +1197,6 @@ static void update_cwnd(GstScreamController *self, guint64 time_us)
     * Save to OWD fraction history
     * used in GetOwdTrend()
     */
-    /* TODO: Write help functions for this? */
     if ((time_us - self->last_add_to_owd_fraction_hist_t_us) > OWD_FRACTION_HIST_INTERVAL) {
         self->owd_fraction_hist[self->owd_fraction_hist_ptr] = get_owd_fraction(self);
         self->owd_fraction_hist_ptr = (self->owd_fraction_hist_ptr+1) % OWD_FRACTION_HIST_SIZE;
@@ -1476,8 +1473,3 @@ static guint get_next_packet_size(ScreamStream *stream)
         stream->next_packet_size : stream->get_next_packet_size_callback(stream->id, stream->user_data);
     return stream->next_packet_size;
 }
-
-
-
-/* TODO: kolla om hur köerna växer.. kanske något inte funkar som det ska?? om det tar längre och längre tid att iterera listorna.. */
-/* TODO: Test returna / approva på olika ställen */
