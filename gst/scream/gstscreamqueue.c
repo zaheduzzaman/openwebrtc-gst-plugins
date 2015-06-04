@@ -545,6 +545,7 @@ static void gst_scream_queue_srcpad_loop(GstScreamQueue *self)
         stream = get_stream(self, item->rtp_ssrc, rtp_item->rtp_pt);
         if (!stream) {
             self->number_of_approved_packets++;
+            rtp_item->adapted = FALSE;
             gst_data_queue_push(self->approved_packets, (GstDataQueueItem *)item);
         } else {
             if (G_LIKELY(gst_data_queue_push(stream->packet_queue, (GstDataQueueItem *)rtp_item))) {
@@ -596,6 +597,7 @@ static GstScreamStream * get_stream(GstScreamQueue *self, guint ssrc, guint pt)
             the bitrates are hardcoded */
         g_signal_emit_by_name(self, "on-payload-adaptation-request", pt, &adapt_stream);
         if (!adapt_stream) {
+            g_print("Added payload %u (stream %u) to ignored_stream_ids", pt, stream_id);
             g_hash_table_add(self->ignored_stream_ids, GUINT_TO_POINTER(stream_id));
         } else {
             if (gst_scream_controller_register_new_stream(self->scream_controller,
