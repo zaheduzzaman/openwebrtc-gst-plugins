@@ -207,7 +207,7 @@ static ScreamStream * get_prioritized_stream(GstScreamController *self);
 
 static void update_cwnd(GstScreamController *self, guint64 time_us);
 
-static gint get_max_bytes_in_flight(GstScreamController *self, gint vec[]);
+static guint get_max_bytes_in_flight(GstScreamController *self, guint vec[]);
 static float get_owd_fraction(GstScreamController *self);
 static void compute_owd_trend(GstScreamController *self);
 static void compute_sbd(GstScreamController *self);
@@ -273,7 +273,7 @@ static void gst_scream_controller_init (GstScreamController *self)
     self->mss = INIT_MSS;
     self->cwnd_min = INIT_MSS * 3;
     self->cwnd_i = 1;
-    self->cwnd = self->cwnd_min;
+    self->cwnd = INIT_MSS * 10;
     self->was_cwnd_increase = FALSE;
     //self->bytes_in_flight_max = 0;
 
@@ -787,8 +787,8 @@ static void update_bytes_in_flight_history(GstScreamController *self, guint64 ti
             self->acc_bytes_in_flight_max = 0;
             self->n_acc_bytes_in_flight_max = 0;
         }
-        self->bytes_in_flight_lo_hist[self->bytes_in_flight_hist_ptr] = bytes_in_flight_lo_max;
-        self->bytes_in_flight_hi_hist[self->bytes_in_flight_hist_ptr] = self->bytes_in_flight_hi_max;
+        self->bytes_in_flight_lo_hist[self->bytes_in_flight_hist_ptr] = MAX(self->cwnd_min, bytes_in_flight_lo_max);
+        self->bytes_in_flight_hi_hist[self->bytes_in_flight_hist_ptr] = MAX(self->cwnd_min, self->bytes_in_flight_hi_max);
         self->bytes_in_flight_hist_ptr = (self->bytes_in_flight_hist_ptr + 1) % BYTES_IN_FLIGHT_HIST_SIZE;
         self->last_bytes_in_flight_t_us = time_us;
         self->bytes_in_flight_hi_max = 0;
@@ -1163,8 +1163,8 @@ static void update_cwnd(GstScreamController *self, guint64 time_us)
 {
     gfloat off_target;
     guint tmp;
-    gfloat max_bytes_in_flight_lo, max_bytes_in_flight_hi;
-    gint max_bytes_in_flight;
+    guint max_bytes_in_flight_lo, max_bytes_in_flight_hi;
+    guint max_bytes_in_flight;
     gfloat th;
     gint n;
 
@@ -1243,57 +1243,65 @@ static void update_cwnd(GstScreamController *self, guint64 time_us)
     }
     else {
         /*
-        * Compute a scaling dependent on the relation between CWND and the inflection point
-        * i.e the last known max value. This helps to reduce the CWND growth close to
-        * the last known congestion point
+        * Only allow CWND to increase if pipe is sufficiently filled or
+        * if congestion level is low
         */
-        gfloat scl_i = (self->cwnd - self->cwnd_i) / ((gfloat)(self->cwnd_i));
-        scl_i *= 4.0f;
-        scl_i = MAX(0.1f, MIN(1.0f, scl_i * scl_i));
-
-        if (self->in_fast_start) {
+        gfloat alpha = 1.25f+2.75f*(1.0f-self->owd_trend_mem);
+        if (self->cwnd <= alpha*bytes_in_flight(self)) {
             /*
-            * In fast start, variable exit condition depending of
-            * if it is the first fast start or a later
+            * Compute a scaling dependent on the relation between CWND and the inflection point
+            * i.e the last known max value. This helps to reduce the CWND growth close to
+            * the last known congestion point
             */
+            gfloat scl_i = (self->cwnd - self->cwnd_i) / ((gfloat)(self->cwnd_i));
+            scl_i *= 4.0f;
+            scl_i = MAX(0.1f, MIN(1.0f, scl_i * scl_i));
 
-            th = 0.2f;
-            if (is_competing_flows(self))
-                th = 0.5f;
-            else if (self->n_fast_start > 1)
-                th = 0.1f;
-            if (self->owd_trend < th) {
-                self->cwnd += MIN(10 * self->mss, (gint)(self->bytes_newly_acked * scl_i));
-            } else {
-                self->in_fast_start = FALSE;
-                self->last_congestion_detected_t_us = time_us;
-                self->cwnd_i = self->cwnd;
-                self->was_cwnd_increase = TRUE;
-            }
-        } else {
-            if (off_target > 0.0f) {
-                gfloat gain;
-                /*
-                * OWD below target
-                */
-                self->was_cwnd_increase = TRUE;
-                /*
-                * Limit growth if OWD shows an increasing trend
-                */
-                gain = CWND_GAIN_UP*(1.0f + MAX(0.0f, 1.0f - self->owd_trend / 0.2f));
-                gain *= scl_i;
 
-                self->cwnd += (gint)(gain * off_target * self->bytes_newly_acked * self->mss / self->cwnd + 0.5f);
-            } else {
+            if (self->in_fast_start) {
                 /*
-                * OWD above target
+                * In fast start, variable exit condition depending of
+                * if it is the first fast start or a later
                 */
-                if (self->was_cwnd_increase) {
-                    self->was_cwnd_increase = FALSE;
+
+                th = 0.2f;
+                if (is_competing_flows(self))
+                    th = 0.5f;
+                else if (self->n_fast_start > 1)
+                    th = 0.1f;
+                if (self->owd_trend < th) {
+                    self->cwnd += MIN(10 * self->mss, (gint)(self->bytes_newly_acked * scl_i));
+                } else {
+                    self->in_fast_start = FALSE;
+                    self->last_congestion_detected_t_us = time_us;
                     self->cwnd_i = self->cwnd;
+                    self->was_cwnd_increase = TRUE;
                 }
-                self->cwnd += (gint)(CWND_GAIN_DOWN * off_target * self->bytes_newly_acked * self->mss / self->cwnd);
-                self->last_congestion_detected_t_us = time_us;
+            } else {
+                if (off_target > 0.0f) {
+                    gfloat gain;
+                    /*
+                    * OWD below target
+                    */
+                    self->was_cwnd_increase = TRUE;
+                    /*
+                    * Limit growth if OWD shows an increasing trend
+                    */
+                    gain = CWND_GAIN_UP*(1.0f + MAX(0.0f, 1.0f - self->owd_trend / 0.2f));
+                    gain *= scl_i;
+
+                    self->cwnd += (gint)(gain * off_target * self->bytes_newly_acked * self->mss / self->cwnd + 0.5f);
+                } else {
+                    /*
+                    * OWD above target
+                    */
+                    if (self->was_cwnd_increase) {
+                        self->was_cwnd_increase = FALSE;
+                        self->cwnd_i = self->cwnd;
+                    }
+                    self->cwnd += (gint)(CWND_GAIN_DOWN * off_target * self->bytes_newly_acked * self->mss / self->cwnd);
+                    self->last_congestion_detected_t_us = time_us;
+                }
             }
         }
     }
@@ -1306,9 +1314,7 @@ static void update_cwnd(GstScreamController *self, guint64 time_us)
         get_max_bytes_in_flight(self, self->bytes_in_flight_lo_hist));
     max_bytes_in_flight_hi = MAX(self->bytes_in_flight_hi_max,
         get_max_bytes_in_flight(self, self->bytes_in_flight_hi_hist));
-
-    max_bytes_in_flight = (gint)(max_bytes_in_flight_hi*(1.0-self->owd_trend_mem) + max_bytes_in_flight_lo*self->owd_trend_mem);
-
+    max_bytes_in_flight = (guint)(max_bytes_in_flight_hi*(1.0-self->owd_trend_mem) + max_bytes_in_flight_lo*self->owd_trend_mem);
     if (max_bytes_in_flight > 0) {
         self->cwnd = MIN(self->cwnd, max_bytes_in_flight);
     }
@@ -1318,15 +1324,15 @@ static void update_cwnd(GstScreamController *self, guint64 time_us)
     * This makes it easier to reach high bitrates under there circumstances
     *  esp if the Video coder bitrate changes a lot.
     */
-    if (FALSE && self->srtt_us < 10000 && self->owd_trend < 0.1) {
+    if (self->srtt_us < 10000 && self->owd_trend_mem < 0.1) {
         /*
-        * A min value given by the estimated transmit bitrate
+        * A min value given by the estimated transmit bitrate and an assumed RTT of 10ms
         */
-        guint cwnd_min = (guint) (self->rate_transmitted*0.01f/8.0f);
+        guint cwnd_min = (guint) (self->rate_transmitted*MAX(0.001f,MIN(self->srtt_us*1e-6,0.01f))/8.0f);
         /*
         * A min value given by the max_bytes_in_flight
         */
-        cwnd_min = MAX(cwnd_min,(gint)(max_bytes_in_flight*1.5));
+        cwnd_min = MAX(cwnd_min,(guint)(max_bytes_in_flight*1.5));
         self->cwnd = MAX(self->cwnd,cwnd_min);
     }
 
@@ -1356,10 +1362,10 @@ static void update_cwnd(GstScreamController *self, guint64 time_us)
 }
 
 
-static gint get_max_bytes_in_flight(GstScreamController *self, gint vec[])
+static guint get_max_bytes_in_flight(GstScreamController *self, guint vec[])
 {
     guint ret = 0;
-    gint n;
+    guint n;
     /*
     * All elements in the buffer must be initialized before
     * return value > 0

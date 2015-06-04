@@ -100,10 +100,10 @@ struct _GstScreamController
     guint cwnd_min;
     guint cwnd_i;
     gboolean was_cwnd_increase;
-    gint bytes_in_flight_lo_hist[BYTES_IN_FLIGHT_HIST_SIZE];
-    gint bytes_in_flight_hi_hist[BYTES_IN_FLIGHT_HIST_SIZE];
-    gint bytes_in_flight_hist_ptr;
-    gint bytes_in_flight_hi_max;
+    guint bytes_in_flight_lo_hist[BYTES_IN_FLIGHT_HIST_SIZE];
+    guint bytes_in_flight_hi_hist[BYTES_IN_FLIGHT_HIST_SIZE];
+    guint bytes_in_flight_hist_ptr;
+    guint bytes_in_flight_hi_max;
     guint acc_bytes_in_flight_max;
     guint n_acc_bytes_in_flight_max;
     gfloat rate_transmitted;
