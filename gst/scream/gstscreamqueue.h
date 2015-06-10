@@ -49,10 +49,8 @@ struct _GstScreamQueue {
     GstPad *src_pad;
     gboolean pass_through;
 
-    gboolean need_stream_start_caps, need_segment;
     guint scream_controller_id;
     GstScreamController *scream_controller;
-    gboolean stream_registered;
     guint priority;
 
     GRWLock lock;
@@ -64,8 +62,6 @@ struct _GstScreamQueue {
     GstDataQueue *approved_packets;
     guint number_of_approved_packets;
     guint64 next_approve_time;
-
-    guint16 ssrc;
 };
 
 struct _GstScreamQueueClass {

@@ -187,8 +187,8 @@ static void gst_scream_queue_class_init(GstScreamQueueClass *klass)
     properties[PROP_GST_SCREAM_CONTROLLER_ID] =
         g_param_spec_uint("scream-controller-id",
             "SCReAM Controller ID",
-            "Every queueoder/decoder pair should have the same, unique, scream-controller-id."
-            "This value must be set before any pads are requested.",
+            "Every queue that should be handled by the same controller should have the same "
+            "scream-controller-id. This value must be set before any pads are requested.",
             0, G_MAXUINT, DEFAULT_GST_SCREAM_CONTROLLER_ID,
             G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
 
@@ -240,9 +240,7 @@ static void packet_queue_full_cb(GstDataQueue *queue, GstScreamStream *stream)
 
 static void gst_scream_data_queue_rtp_item_free(GstScreamDataQueueRtpItem *item)
 {
-    g_print("gst_scream_data_queue_rtp_item_free()\n");
     if (((GstDataQueueItem *)item)->object) {
-        g_print("unref mini object\n");
         gst_mini_object_unref(((GstDataQueueItem *)item)->object);
     }
     g_slice_free(GstScreamDataQueueRtpItem, item);
@@ -298,8 +296,6 @@ static void gst_scream_queue_init(GstScreamQueue *self)
     self->priority = DEFAULT_PRIORITY;
     self->pass_through = DEFAULT_PASS_THROUGH;
     self->next_approve_time = 0;
-
-    self->ssrc = 0;
 }
 
 static void gst_scream_queue_finalize(GObject *object)
@@ -307,7 +303,6 @@ static void gst_scream_queue_finalize(GObject *object)
     GstScreamQueue *self = GST_SCREAM_QUEUE(object);
     GstDataQueueItem *item;
 
-    g_print("gst_scream_queue_finalize()\n");
     while (!gst_data_queue_is_empty(self->approved_packets)) {
         gst_data_queue_pop(self->approved_packets, &item);
         item->destroy(item);
@@ -447,10 +442,8 @@ static GstFlowReturn gst_scream_queue_sink_chain(GstPad *pad, GstObject *parent,
     }
 
     if (G_UNLIKELY(!gst_data_queue_push(self->incoming_packets, (GstDataQueueItem *)rtp_item))) {
-        g_print("Failed pusing to incoming packets queue. flushing?\n");
+        g_log(G_LOG_DOMAIN, G_LOG_LEVEL_DEBUG, "Failed pusing RTP packet to incoming packet queue. flushing?");
         ((GstDataQueueItem *)rtp_item)->destroy(rtp_item);
-        /*GST_DEBUG_OBJECT(self, "Failed to push item because we're flushing");*/
-        //g_print("Failed to push item because we're flushing");
     }
 end:
     flow_ret = GST_PAD_IS_FLUSHING(pad) ? GST_FLOW_FLUSHING : flow_ret;
@@ -553,16 +546,12 @@ static void gst_scream_queue_srcpad_loop(GstScreamQueue *self)
                 stream->enqueued_packets++;
                 rtp_item->adapted = TRUE;
                 self->next_approve_time = 0;
-
                 gst_scream_controller_new_rtp_packet(self->scream_controller, stream_id, rtp_item->rtp_ts,
                     rtp_item->enqueued_time, stream->enqueued_payload_size, rtp_item->rtp_payload_size);
             } else {
-                g_print("failed to push to packet_queue. flushing?\n");
+                g_log(G_LOG_DOMAIN, G_LOG_LEVEL_DEBUG, "Failed pusing RTP packet to the stream packet queue. flushing?");
                 ((GstDataQueueItem *)rtp_item)->destroy(rtp_item);
-                /*GST_DEBUG_OBJECT(self, "Failed to push item because we're flushing");*/
-                //g_print("Failed to push item because we're flushing");
             }
-
         }
     } else { /* item->type == GST_SCREAM_DATA_QUEUE_ITEM_TYPE_RTCP */
         GstScreamDataQueueRtcpItem *rtcp_item = (GstScreamDataQueueRtcpItem *)item;
@@ -592,12 +581,9 @@ static GstScreamStream * get_stream(GstScreamQueue *self, guint ssrc, guint pt)
     } else if (g_hash_table_contains(self->ignored_stream_ids, GUINT_TO_POINTER(stream_id))) {
         /* DO NOTHING */
     } else {
-        /* TODO: Is it possible to return multiple return values somehow? Can we use this
-            signal to ask the application about what max / min bitrates we should use? Right now
-            the bitrates are hardcoded */
         g_signal_emit_by_name(self, "on-payload-adaptation-request", pt, &adapt_stream);
         if (!adapt_stream) {
-            g_print("Added payload %u (stream %u) to ignored_stream_ids", pt, stream_id);
+            g_log(G_LOG_DOMAIN, G_LOG_LEVEL_DEBUG, "Ignoring adaptation for payload %u for ssrc %u", pt, stream_id);
             g_hash_table_add(self->ignored_stream_ids, GUINT_TO_POINTER(stream_id));
         } else {
             if (gst_scream_controller_register_new_stream(self->scream_controller,
@@ -717,7 +703,6 @@ static void approve_transmit_cb(guint stream_id, GstScreamQueue *self) {
 static void clear_queue(guint stream_id, GstScreamQueue *self)
 {
     GstScreamStream *stream;
-    g_print("clear_queue()");
     g_rw_lock_reader_lock(&self->lock);
     stream = g_hash_table_lookup(self->streams, GUINT_TO_POINTER(stream_id));
     g_rw_lock_reader_unlock(&self->lock);
@@ -726,7 +711,6 @@ static void clear_queue(guint stream_id, GstScreamQueue *self)
     stream->enqueued_packets = 0;
     gst_pad_push_event(self->sink_pad,
         gst_video_event_new_upstream_force_key_unit(GST_CLOCK_TIME_NONE, FALSE, 0));
-    g_print("clear_queue() done!");
 }
 
 
