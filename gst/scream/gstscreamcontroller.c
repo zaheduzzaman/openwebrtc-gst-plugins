@@ -232,7 +232,6 @@ static void gst_scream_controller_class_init (GstScreamControllerClass *klass)
 static void gst_scream_controller_init (GstScreamController *self)
 {
     gint n;
-    //g_print("gst_scream_controller_init()\n");
 
     self->approve_timer_running = FALSE;
 
@@ -316,10 +315,7 @@ static void gst_scream_controller_init (GstScreamController *self)
 static void gst_scream_controller_finalize(GObject *object)
 {
     GstScreamController *self = GST_SCREAM_CONTROLLER(object);
-    g_print("gst_scream_controller_finalize()\n");
-
     g_hash_table_unref(self->streams);
-
     G_OBJECT_CLASS(gst_scream_controller_parent_class)->finalize(object);
 }
 
@@ -357,7 +353,6 @@ GstScreamController *gst_scream_controller_get(guint32 controller_id)
         controllers = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, NULL);
     }
 
-    //g_print("gst_scream_controller_get() returning controller for id %u\n", controller_id);
     controller = g_hash_table_lookup(controllers, GUINT_TO_POINTER(controller_id));
     if (!controller) {
         controller = g_object_new(GST_SCREAM_TYPE_CONTROLLER, NULL);
@@ -381,10 +376,6 @@ gboolean gst_scream_controller_register_new_stream(GstScreamController *controll
     gboolean ret = FALSE;
     gint n;
 
-    g_print("gst_scream_controller_register_new_stream()\n");
-    //g_print("gst_scream_controller_register_new_stream() with id %u on controller %p"
-        //". min_bitrate = %u, max_bitrate = %u\n", stream_id, (void *)controller, min_bitrate,
-        //max_bitrate);
     g_mutex_lock(&controller->lock);
     if (g_hash_table_contains(controller->streams, GUINT_TO_POINTER(stream_id))) {
         g_warning("Failed to register new scream stream. The session id needs to be unique.");
@@ -429,8 +420,6 @@ gboolean gst_scream_controller_register_new_stream(GstScreamController *controll
 
 
     g_hash_table_insert(controller->streams, GUINT_TO_POINTER(stream_id), stream);
-    //g_print("Registering scream stream with id %u. minBitrate = %f, maxBitrate = %f\n", stream_id,
-        //stream->minBitrate, stream->maxBitrate);
     ret = TRUE;
 end:
     g_mutex_unlock(&controller->lock);
@@ -891,11 +880,6 @@ static void update_target_stream_bitrate(GstScreamController *self, ScreamStream
         stream->last_bitrate_adjust_t_us  = time_us;
     } else {
         if (time_us - stream->last_bitrate_adjust_t_us < RATE_ADJUST_INTERVAL) {
-            /*
-            //g_print("update_target_stream_bitrate() returning."
-                " %" G_GUINT64_FORMAT " - %" G_GUINT64_FORMAT " < %" G_GUINT64_FORMAT "\n", time_us,
-                stream->lastBitrateAdjustT_us, kRateAdjustInterval_us);
-            */
             return;
         }
 
@@ -953,7 +937,7 @@ static void update_target_stream_bitrate(GstScreamController *self, ScreamStream
         increment = 0.0f;
         if (stream->tx_size_bits_avg / MAX(br,stream->target_bitrate) > MAX_RTP_QUEUE_TIME &&
             time_us - stream->t_last_rtp_q_clear_us > 5 * MAX_RTP_QUEUE_TIME * 1000000) {
-            g_print("Target bitrate :  RTP queue delay ~ %f."
+            g_log(G_LOG_DOMAIN, G_LOG_LEVEL_DEBUG, "Target bitrate :  RTP queue delay ~ %f."
                 " Clear RTP queue \n", stream->tx_size_bits_avg / MAX(br,stream->target_bitrate));
             stream->target_bitrate = stream->min_bitrate;
             stream->next_packet_size = 0;
@@ -1047,16 +1031,17 @@ static void update_target_stream_bitrate(GstScreamController *self, ScreamStream
     if (self->n_acc_bytes_in_flight_max > 0) {
         in_fl = self->acc_bytes_in_flight_max/self->n_acc_bytes_in_flight_max;
     }
-    g_print("Target br adj : "
-            "target(actual)=%4.0f(%4.0f,%4.0f,%4.0f)k rtpQ=%4.0fms cwnd=%5u(%5u) srtt=%3.0fms owd(T)=%3.0f(%3.0f)ms fs=%u dt=%3.0f\n",
-                    stream->target_bitrate/1000.0f,
-                    stream->rate_rtp/1000.0f,
-                    stream->rate_transmitted/1000.0f,
-                    stream->rate_acked/1000.0f,
-                    (tx_size_bits/MAX(1e5f,br)*1000.0f),
-                    self->cwnd, in_fl,
-                    self->srtt_sh_us/1000.0f, self->owd*1000.0f, self->owd_target*1000.0f,
-                    self->in_fast_start, self->delta_t/1000.0f);
+    g_log(G_LOG_DOMAIN, G_LOG_LEVEL_DEBUG, "Target br adj : "
+            "target(actual)=%4.0f(%4.0f,%4.0f,%4.0f)k rtpQ=%4.0fms cwnd=%5u(%5u) srtt=%3.0fms "
+            "owd(T)=%3.0f(%3.0f)ms fs=%u dt=%3.0f\n",
+            stream->target_bitrate/1000.0f,
+            stream->rate_rtp/1000.0f,
+            stream->rate_transmitted/1000.0f,
+            stream->rate_acked/1000.0f,
+            (tx_size_bits/MAX(1e5f,br)*1000.0f),
+            self->cwnd, in_fl,
+            self->srtt_sh_us/1000.0f, self->owd*1000.0f, self->owd_target*1000.0f,
+            self->in_fast_start, self->delta_t/1000.0f);
     }
     if (stream->on_bitrate_callback)
         stream->on_bitrate_callback((guint)stream->target_bitrate, stream->id, stream->user_data);
@@ -1130,29 +1115,28 @@ void gst_scream_controller_incoming_feedback(GstScreamController *self, guint st
     * Determine if a loss event has occurred
     */
     if (stream->n_loss < n_loss) {
-      /*
-      * The loss counter has increased
-      */
-      g_print("LOSS %u  SN=%u\n",n_loss-stream->n_loss,highest_seq);
-       stream->n_loss = n_loss;
-       if (time_us - self->last_loss_event_t_us > self->srtt_us) {
-          /*
-          * The loss counter has increased and it is more than one RTT since last
-          * time loss was detected
-          */
-          self->loss_event = TRUE;
-          self->last_loss_event_t_us = time_us;
+        /*
+        * The loss counter has increased
+        */
+        g_log(G_LOG_DOMAIN, G_LOG_LEVEL_DEBUG, "Scream detected %u losses. highest seq is %u\n",
+            n_loss-stream->n_loss,highest_seq);
+        stream->n_loss = n_loss;
+        if (time_us - self->last_loss_event_t_us > self->srtt_us) {
+            /*
+            * The loss counter has increased and it is more than one RTT since last
+            * time loss was detected
+            */
+            self->loss_event = TRUE;
+            self->last_loss_event_t_us = time_us;
 
-          list = it = g_hash_table_get_values(self->streams);
-          while (it) {
-            ((ScreamStream *)it->data)->loss_event_flag = TRUE;
-            it = g_list_next(it);
-          }
-          g_list_free(list);
-       }
+            list = it = g_hash_table_get_values(self->streams);
+            while (it) {
+                ((ScreamStream *)it->data)->loss_event_flag = TRUE;
+                it = g_list_next(it);
+            }
+            g_list_free(list);
+        }
     }
-    //g_print("gst_scream_controller_incoming_feedback() highest_seq = %u. "
-    //    "bytesNewlyAcked = %u timestamp=%u\n", highest_seq, self->bytes_newly_acked, timestamp);
     update_cwnd(self, time_us);
 end:
     return;
