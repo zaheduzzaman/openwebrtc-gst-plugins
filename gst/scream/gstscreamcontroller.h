@@ -27,6 +27,8 @@
 #define __GST_SCREAM_CONTROLLER_H__
 
 #include <glib-object.h>
+#include <stdio.h>
+#include <string.h>
 #define INET
 #define INET6
 
@@ -39,6 +41,8 @@
 #define GST_SCREAM_CONTROLLER_CLASS(klass)          (G_TYPE_CHECK_CLASS_CAST ((klass), GST_SCREAM_TYPE_CONTROLLER, GstScreamControllerClass))
 #define GST_SCREAM_IS_CONTROLLER_CLASS(klass)       (G_TYPE_CHECK_CLASS_TYPE ((klass), GST_SCREAM_TYPE_CONTROLLER))
 #define GST_SCREAM_CONTROLLER_GET_CLASS(obj)        (G_TYPE_INSTANCE_GET_CLASS ((obj), GST_SCREAM_TYPE_CONTROLLER, GstScreamControllerClass))
+#define GST_SCREAM_CONTROLLER_LOG_DOMAIN "scream_controller"
+#define GST_SCREAM_STREAM_LOG_DOMAIN "scream_stream"
 
 typedef struct _GstScreamController        GstScreamController;
 typedef struct _GstScreamControllerClass   GstScreamControllerClass;
@@ -61,6 +65,7 @@ typedef void (*GstScreamQueueClearQueueCb) (guint stream_id, gpointer user_data)
 #define OWD_FRACTION_HIST_SIZE 20
 #define OWD_NORM_HIST_SIZE 100
 #define BYTES_IN_FLIGHT_HIST_SIZE 10
+
 
 struct _GstScreamController
 {
@@ -134,6 +139,10 @@ struct _GstScreamController
     guint64 next_transmit_t_us;
     guint64 last_rate_update_t_us;
 
+    // for logging
+
+    FILE *logfile_controller_level;
+
     // TODO Debug variables , remove
     guint64 lastfb;
 };
@@ -166,5 +175,8 @@ guint64 gst_scream_controller_approve_transmits(GstScreamController *self, guint
 void gst_scream_controller_incoming_feedback(GstScreamController *self, guint stream_id,
     guint64 time_us, guint timestamp, guint highest_seq, guint n_loss, guint n_ecn, gboolean q_bit);
 
+//handler for writing log messages to file
+
+void gst_scream_log_to_file (const gchar *log_domain, GLogLevelFlags log_level, const gchar *message, gpointer user_data);
 
 #endif /* __GST_SCREAM_CONTROLLER_H__ */

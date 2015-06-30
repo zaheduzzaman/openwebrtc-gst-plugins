@@ -167,6 +167,8 @@ typedef struct {
 
 
     guint64 t_start_us;
+
+    FILE *logfile_stream_level;    /* log file to use for logging per stream*/
 } ScreamStream;
 
 typedef struct {
@@ -215,6 +217,7 @@ static guint estimate_owd(GstScreamController *self, guint64 time_us);
 static guint get_base_owd(GstScreamController *self);
 static gboolean is_competing_flows(GstScreamController *self);
 static guint get_next_packet_size(ScreamStream *stream);
+
 
 static void gst_scream_controller_class_init (GstScreamControllerClass *klass)
 {
@@ -307,6 +310,9 @@ static void gst_scream_controller_init (GstScreamController *self)
 
     self->streams = g_hash_table_new_full(NULL, NULL, NULL, (GDestroyNotify)g_free);
 
+    self->logfile_controller_level = fopen("/home/esarzah/scream/logs/scream_controller.log","w");
+    g_log_set_handler (GST_SCREAM_CONTROLLER_LOG_DOMAIN, G_LOG_LEVEL_DEBUG, gst_scream_log_to_file,self->logfile_controller_level);
+    g_log(GST_SCREAM_CONTROLLER_LOG_DOMAIN,G_LOG_LEVEL_DEBUG,"stream_id \t target rate (kbps)\t encoder output(kbps)\t transimitted rate(kbps)\t Acked rate(kbps)\t rtpQ(ms)\t cwnd(bytes)\t bytes_in_flight\t srtt(ms)\t Measured owd(ms)\t Target owd(ms)\t fs\t Time_since_last_FB(ms)\n");
 
     /*g_mutex_init(&self->lock);*/
 
@@ -315,6 +321,12 @@ static void gst_scream_controller_init (GstScreamController *self)
 static void gst_scream_controller_finalize(GObject *object)
 {
     GstScreamController *self = GST_SCREAM_CONTROLLER(object);
+    if (self->logfile_controller_level != NULL){
+        /* just write something to an open file */
+        /*g_print ("%s\n", "printting to the file");*/
+        //fprintf (self->logfile_controller_level, "%s\n", "this is a test");
+        fclose (self->logfile_controller_level);
+    }
     g_hash_table_unref(self->streams);
     G_OBJECT_CLASS(gst_scream_controller_parent_class)->finalize(object);
 }
@@ -375,6 +387,8 @@ gboolean gst_scream_controller_register_new_stream(GstScreamController *controll
     ScreamStream *stream;
     gboolean ret = FALSE;
     gint n;
+    gchar *filename;
+    gchar *label_sting;
 
     g_mutex_lock(&controller->lock);
     if (g_hash_table_contains(controller->streams, GUINT_TO_POINTER(stream_id))) {
@@ -417,6 +431,13 @@ gboolean gst_scream_controller_register_new_stream(GstScreamController *controll
         stream->rate_rtp_hist[n] = 0;
     stream->rate_rtp_hist_ptr = 0;
     stream->rate_rtp_median = 0.0f;
+
+    /*open file for logging*/
+    filename = g_strdup_printf("/home/esarzah/scream/logs/scream_%u.log", stream_id);
+    //g_print("filename is %s\n", filename);
+    stream->logfile_stream_level = fopen(filename,"w");
+    label_sting="stream_id\t time_us\t timestamp\t highest_seq\t n_loss\t n_ecn\t q_bit\n";
+    fprintf(stream->logfile_stream_level,"%s",label_sting);
 
 
     g_hash_table_insert(controller->streams, GUINT_TO_POINTER(stream_id), stream);
@@ -937,7 +958,7 @@ static void update_target_stream_bitrate(GstScreamController *self, ScreamStream
         increment = 0.0f;
         if (stream->tx_size_bits_avg / MAX(br,stream->target_bitrate) > MAX_RTP_QUEUE_TIME &&
             time_us - stream->t_last_rtp_q_clear_us > 5 * MAX_RTP_QUEUE_TIME * 1000000) {
-            g_log(G_LOG_DOMAIN, G_LOG_LEVEL_DEBUG, "Target bitrate :  RTP queue delay ~ %f."
+            g_log(GST_SCREAM_STREAM_LOG_DOMAIN, G_LOG_LEVEL_DEBUG, "Target bitrate :  RTP queue delay ~ %f."
                 " Clear RTP queue \n", stream->tx_size_bits_avg / MAX(br,stream->target_bitrate));
             stream->target_bitrate = stream->min_bitrate;
             stream->next_packet_size = 0;
@@ -1031,7 +1052,7 @@ static void update_target_stream_bitrate(GstScreamController *self, ScreamStream
     if (self->n_acc_bytes_in_flight_max > 0) {
         in_fl = self->acc_bytes_in_flight_max/self->n_acc_bytes_in_flight_max;
     }
-    g_log(G_LOG_DOMAIN, G_LOG_LEVEL_DEBUG, "Target br adj : "
+    /*g_log(GST_SCREAM_CONTROLLER_LOG_DOMAIN, G_LOG_LEVEL_DEBUG, "Target br adj : "
             "target(actual)=%4.0f(%4.0f,%4.0f,%4.0f)k rtpQ=%4.0fms cwnd=%5u(%5u) srtt=%3.0fms "
             "owd(T)=%3.0f(%3.0f)ms fs=%u dt=%3.0f\n",
             stream->target_bitrate/1000.0f,
@@ -1041,7 +1062,19 @@ static void update_target_stream_bitrate(GstScreamController *self, ScreamStream
             (tx_size_bits/MAX(1e5f,br)*1000.0f),
             self->cwnd, in_fl,
             self->srtt_sh_us/1000.0f, self->owd*1000.0f, self->owd_target*1000.0f,
-            self->in_fast_start, self->delta_t/1000.0f);
+            self->in_fast_start, self->delta_t/1000.0f);*/
+
+            g_log(GST_SCREAM_CONTROLLER_LOG_DOMAIN, G_LOG_LEVEL_DEBUG,"%u\t"
+                    "%4.0f\t%4.0f\t%4.0f\t%4.0f\t %4.0f\t %5u\t%5u\t %3.0f\t "
+                    "%3.0f\t%3.0f\t %u\t %3.0f\n",stream->id,
+                    stream->target_bitrate/1000.0f,
+                    stream->rate_rtp/1000.0f,
+                    stream->rate_transmitted/1000.0f,
+                    stream->rate_acked/1000.0f,
+                    (tx_size_bits/MAX(1e5f,br)*1000.0f),
+                    self->cwnd, in_fl,
+                    self->srtt_sh_us/1000.0f, self->owd*1000.0f, self->owd_target*1000.0f,
+                    self->in_fast_start, self->delta_t/1000.0f);
     }
     if (stream->on_bitrate_callback)
         stream->on_bitrate_callback((guint)stream->target_bitrate, stream->id, stream->user_data);
@@ -1061,6 +1094,12 @@ void gst_scream_controller_incoming_feedback(GstScreamController *self, guint st
     if (!stream) {
         g_warning("Received feedback for an unknown stream.");
         goto end;
+    }
+
+    /*log the RTCP reception*/
+    if (stream->logfile_stream_level != NULL){
+        /*g_print ("%s\n", "printting to the file");*/
+        fprintf (stream->logfile_stream_level, "%u\t%lu\t%lu\t%u\t%u\t%u\t%d\n",stream_id, time_us,timestamp, highest_seq, n_loss,  n_ecn, q_bit);
     }
 
     self->acc_bytes_in_flight_max += bytes_in_flight(self);
@@ -1118,7 +1157,7 @@ void gst_scream_controller_incoming_feedback(GstScreamController *self, guint st
         /*
         * The loss counter has increased
         */
-        g_log(G_LOG_DOMAIN, G_LOG_LEVEL_DEBUG, "Scream detected %u losses. highest seq is %u\n",
+        g_log(GST_SCREAM_STREAM_LOG_DOMAIN, G_LOG_LEVEL_DEBUG, "Scream detected %u losses. highest seq is %u\n",
             n_loss-stream->n_loss,highest_seq);
         stream->n_loss = n_loss;
         if (time_us - self->last_loss_event_t_us > self->srtt_us) {
@@ -1141,6 +1180,14 @@ void gst_scream_controller_incoming_feedback(GstScreamController *self, guint st
 end:
     return;
 
+}
+
+void gst_scream_log_to_file (const gchar *log_domain, GLogLevelFlags log_level, const gchar *message, gpointer user_data){
+    if (user_data!=NULL){
+        fprintf(user_data, "%s\n", message);
+    }else{
+        printf("%s\n",message);
+    }
 }
 
 static void update_cwnd(GstScreamController *self, guint64 time_us)
