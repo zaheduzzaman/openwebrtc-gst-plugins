@@ -218,6 +218,8 @@ static guint get_base_owd(GstScreamController *self);
 static gboolean is_competing_flows(GstScreamController *self);
 static guint get_next_packet_size(ScreamStream *stream);
 
+static guint64 get_gst_time_us(GstScreamController *self);
+
 
 static void gst_scream_controller_class_init (GstScreamControllerClass *klass)
 {
@@ -310,9 +312,6 @@ static void gst_scream_controller_init (GstScreamController *self)
 
     self->streams = g_hash_table_new_full(NULL, NULL, NULL, (GDestroyNotify)g_free);
 
-    self->logfile_controller_level = fopen("/home/esarzah/scream/logs/scream_controller.log","w");
-    g_log_set_handler (GST_SCREAM_CONTROLLER_LOG_DOMAIN, G_LOG_LEVEL_DEBUG, gst_scream_log_to_file,self->logfile_controller_level);
-    g_log(GST_SCREAM_CONTROLLER_LOG_DOMAIN,G_LOG_LEVEL_DEBUG,"stream_id \t target rate (kbps)\t encoder output(kbps)\t transimitted rate(kbps)\t Acked rate(kbps)\t rtpQ(ms)\t cwnd(bytes)\t bytes_in_flight\t srtt(ms)\t Measured owd(ms)\t Target owd(ms)\t fs\t Time_since_last_FB(ms)\n");
 
     /*g_mutex_init(&self->lock);*/
 
@@ -368,6 +367,7 @@ GstScreamController *gst_scream_controller_get(guint32 controller_id)
     controller = g_hash_table_lookup(controllers, GUINT_TO_POINTER(controller_id));
     if (!controller) {
         controller = g_object_new(GST_SCREAM_TYPE_CONTROLLER, NULL);
+        create_logfile(controller,g_strdup_printf("%u", controller_id));
         g_hash_table_insert(controllers, GUINT_TO_POINTER(controller_id), controller);
     } else {
         g_object_ref(controller);
@@ -1075,6 +1075,7 @@ static void update_target_stream_bitrate(GstScreamController *self, ScreamStream
                     self->cwnd, in_fl,
                     self->srtt_sh_us/1000.0f, self->owd*1000.0f, self->owd_target*1000.0f,
                     self->in_fast_start, self->delta_t/1000.0f);
+                    g_print("===================== current time =%u", get_gst_time_us(self));
     }
     if (stream->on_bitrate_callback)
         stream->on_bitrate_callback((guint)stream->target_bitrate, stream->id, stream->user_data);
@@ -1188,6 +1189,16 @@ void gst_scream_log_to_file (const gchar *log_domain, GLogLevelFlags log_level, 
     }else{
         printf("%s\n",message);
     }
+}
+
+void create_logfile ( GstScreamController *self, gchar *logfile_id){
+    gchar *filename = g_strdup_printf("/home/esarzah/scream/logs/scream_controller_%s.log", logfile_id);
+    //g_print("filename is %s\n", filename);
+    //self->logfile_controller_level = fopen("/home/esarzah/scream/logs/scream_controller.log","w");
+    self->logfile_controller_level = fopen(filename,"w");
+    g_log_set_handler (GST_SCREAM_CONTROLLER_LOG_DOMAIN, G_LOG_LEVEL_DEBUG, gst_scream_log_to_file,self->logfile_controller_level);
+    g_log(GST_SCREAM_CONTROLLER_LOG_DOMAIN,G_LOG_LEVEL_DEBUG,"stream_id \t target rate (kbps)\t encoder output(kbps)\t transimitted rate(kbps)\t Acked rate(kbps)\t rtpQ(ms)\t cwnd(bytes)\t bytes_in_flight\t srtt(ms)\t Measured owd(ms)\t Target owd(ms)\t fs\t Time_since_last_FB(ms)\n");
+
 }
 
 static void update_cwnd(GstScreamController *self, guint64 time_us)
@@ -1509,4 +1520,17 @@ static guint get_next_packet_size(ScreamStream *stream)
     stream->next_packet_size = stream->next_packet_size != 0 ?
         stream->next_packet_size : stream->get_next_packet_size_callback(stream->id, stream->user_data);
     return stream->next_packet_size;
+}
+
+static guint64 get_gst_time_us(GstScreamController *self)
+{
+    GstClock *clock = NULL;
+    GstClockTime time = 0;
+
+    //clock = gst_element_get_clock(GST_ELEMENT(self));
+    clock = gst_system_clock_obtain ();
+    if (G_LIKELY(clock)) {
+        time = gst_clock_get_time(clock);
+    }
+    return time / 1000;
 }

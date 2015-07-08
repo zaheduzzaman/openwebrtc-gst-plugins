@@ -27,6 +27,7 @@
 #define __GST_SCREAM_CONTROLLER_H__
 
 #include <glib-object.h>
+#include <gst/gst.h>
 #include <stdio.h>
 #include <string.h>
 #define INET
@@ -174,6 +175,10 @@ guint64 gst_scream_controller_approve_transmits(GstScreamController *self, guint
 
 void gst_scream_controller_incoming_feedback(GstScreamController *self, guint stream_id,
     guint64 time_us, guint timestamp, guint highest_seq, guint n_loss, guint n_ecn, gboolean q_bit);
+
+// function to crate log files for gst_controller
+
+void create_logfile (GstScreamController *self, gchar *logfile_id);
 
 //handler for writing log messages to file
 
