@@ -218,7 +218,7 @@ static guint get_base_owd(GstScreamController *self);
 static gboolean is_competing_flows(GstScreamController *self);
 static guint get_next_packet_size(ScreamStream *stream);
 
-static guint64 get_gst_time_us(GstScreamController *self);
+static guint64 get_sys_time_us(GstScreamController *self);
 
 
 static void gst_scream_controller_class_init (GstScreamControllerClass *klass)
@@ -1062,11 +1062,11 @@ static void update_target_stream_bitrate(GstScreamController *self, ScreamStream
             (tx_size_bits/MAX(1e5f,br)*1000.0f),
             self->cwnd, in_fl,
             self->srtt_sh_us/1000.0f, self->owd*1000.0f, self->owd_target*1000.0f,
-            self->in_fast_start, self->delta_t/1000.0f);*/
+            self->in_fast_start, self->delta_t/1000.0f);
 
-            g_log(GST_SCREAM_CONTROLLER_LOG_DOMAIN, G_LOG_LEVEL_DEBUG,"%u\t"
+            g_log(GST_SCREAM_CONTROLLER_LOG_DOMAIN, G_LOG_LEVEL_DEBUG,"%u\t %u\t"
                     "%4.0f\t%4.0f\t%4.0f\t%4.0f\t %4.0f\t %5u\t%5u\t %3.0f\t "
-                    "%3.0f\t%3.0f\t %u\t %3.0f\n",stream->id,
+                    "%3.0f\t%3.0f\t %u\t %3.0f\n",get_sys_time_us(self), stream->id,
                     stream->target_bitrate/1000.0f,
                     stream->rate_rtp/1000.0f,
                     stream->rate_transmitted/1000.0f,
@@ -1074,8 +1074,20 @@ static void update_target_stream_bitrate(GstScreamController *self, ScreamStream
                     (tx_size_bits/MAX(1e5f,br)*1000.0f),
                     self->cwnd, in_fl,
                     self->srtt_sh_us/1000.0f, self->owd*1000.0f, self->owd_target*1000.0f,
-                    self->in_fast_start, self->delta_t/1000.0f);
-                    g_print("===================== current time =%u", get_gst_time_us(self));
+                    self->in_fast_start, self->delta_t/1000.0f);*/
+
+                    fprintf(self->logfile_controller_level,"%u\t %u\t"
+                            "%4.0f\t%4.0f\t%4.0f\t%4.0f\t %4.0f\t %5u\t%5u\t %3.0f\t "
+                            "%3.0f\t%3.0f\t %u\t %3.0f\n",get_sys_time_us(self), stream->id,
+                            stream->target_bitrate/1000.0f,
+                            stream->rate_rtp/1000.0f,
+                            stream->rate_transmitted/1000.0f,
+                            stream->rate_acked/1000.0f,
+                            (tx_size_bits/MAX(1e5f,br)*1000.0f),
+                            self->cwnd, in_fl,
+                            self->srtt_sh_us/1000.0f, self->owd*1000.0f, self->owd_target*1000.0f,
+                            self->in_fast_start, self->delta_t/1000.0f);
+
     }
     if (stream->on_bitrate_callback)
         stream->on_bitrate_callback((guint)stream->target_bitrate, stream->id, stream->user_data);
@@ -1185,19 +1197,21 @@ end:
 
 void gst_scream_log_to_file (const gchar *log_domain, GLogLevelFlags log_level, const gchar *message, gpointer user_data){
     if (user_data!=NULL){
-        fprintf(user_data, "%s\n", message);
-    }else{
-        printf("%s\n",message);
+        GstScreamController *self = user_data;
+        if (self->logfile_controller_level!=NULL){
+            fprintf(self->logfile_controller_level, "%s\n", message);
+        }else{
+            printf("%s\n",message);
+        }
     }
 }
 
 void create_logfile ( GstScreamController *self, gchar *logfile_id){
     gchar *filename = g_strdup_printf("/home/esarzah/scream/logs/scream_controller_%s.log", logfile_id);
-    //g_print("filename is %s\n", filename);
-    //self->logfile_controller_level = fopen("/home/esarzah/scream/logs/scream_controller.log","w");
     self->logfile_controller_level = fopen(filename,"w");
-    g_log_set_handler (GST_SCREAM_CONTROLLER_LOG_DOMAIN, G_LOG_LEVEL_DEBUG, gst_scream_log_to_file,self->logfile_controller_level);
-    g_log(GST_SCREAM_CONTROLLER_LOG_DOMAIN,G_LOG_LEVEL_DEBUG,"stream_id \t target rate (kbps)\t encoder output(kbps)\t transimitted rate(kbps)\t Acked rate(kbps)\t rtpQ(ms)\t cwnd(bytes)\t bytes_in_flight\t srtt(ms)\t Measured owd(ms)\t Target owd(ms)\t fs\t Time_since_last_FB(ms)\n");
+    /*g_log_set_handler (GST_SCREAM_CONTROLLER_LOG_DOMAIN, G_LOG_LEVEL_DEBUG, gst_scream_log_to_file,self);
+    g_log(GST_SCREAM_CONTROLLER_LOG_DOMAIN,G_LOG_LEVEL_DEBUG,"log_time \tstream_id \t target rate (kbps)\t encoder output(kbps)\t transimitted rate(kbps)\t Acked rate(kbps)\t rtpQ(ms)\t cwnd(bytes)\t bytes_in_flight\t srtt(ms)\t Measured owd(ms)\t Target owd(ms)\t fs\t Time_since_last_FB(ms)\n");*/
+    fprintf(self->logfile_controller_level,"log_time \tstream_id \t target rate (kbps)\t encoder output(kbps)\t transimitted rate(kbps)\t Acked rate(kbps)\t rtpQ(ms)\t cwnd(bytes)\t bytes_in_flight\t srtt(ms)\t Measured owd(ms)\t Target owd(ms)\t fs\t Time_since_last_FB(ms)\n");
 
 }
 
@@ -1522,7 +1536,7 @@ static guint get_next_packet_size(ScreamStream *stream)
     return stream->next_packet_size;
 }
 
-static guint64 get_gst_time_us(GstScreamController *self)
+static guint64 get_sys_time_us(GstScreamController *self)
 {
     GstClock *clock = NULL;
     GstClockTime time = 0;
